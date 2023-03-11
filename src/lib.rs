@@ -1,22 +1,53 @@
+#![allow(dead_code)]
+
 use std::collections::VecDeque;
+use std::collections::HashSet;
 
 /*
-  if code, then slay
-*/
+Quantifiers
+    * :  zero or more times
+    + :  one or more times
+    ? :  zero or one times
+
+Special Symbols
+    \d : 0-9
+    \D :  non-digit character
+    \l : [a-zA-Z]
+    \L : non-alpha character
+    \a : alphanumeric
+    \A : non-alphanumeric
+    .  : any character
+    \  : escape character
+
+Grouping
+    () : matching group
+    a|b : match expression a or b (union)
+ */
 
 #[derive(Copy, Clone, PartialEq, Eq)]
 enum Symbol {
     Op(Operator),
-    Input(char)
+    Transit(Transit)
 }
 
-#[derive(Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+enum Transit {
+    Char(char),
+    NonDigit,
+    Digit,
+    Alpha,
+    Any
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd)]
 enum Operator {
+    Star,
+    Plus,
+    Question,
+    Concat,
+    Union,
     RightParen,
     LeftParen,
-    Star,
-    Union,
-    Concat,
 }
 
 #[derive(Copy, Clone, PartialEq)]
@@ -24,13 +55,13 @@ struct StateID(usize);
 
 struct NFA_State {
     id: StateID,
-    transitions: Vec<(Option<char>, StateID)>,
+    transitions: Vec<(Option<Transit>, StateID)>, // None transit == Epsilon Transition
 }
 
 struct DFA_State {
     id:                    StateID,
     equivalent_nfa_states: Vec<StateID>,
-    transitions:           Vec<(char, StateID)>,
+    transitions:           Vec<(Transit, StateID)>, // removed option to remove epsilon transitions
     accepting:             bool,
 }
 
@@ -47,7 +78,7 @@ struct Regex {
     nfa_states:      Vec<NFA_State>,    
     dfa_states:      Vec<DFA_State>,    
     final_nfa:       NFA,
-    alphabet:        Vec<char>,
+    alphabet:        HashSet<Transit>,
 }
 
 impl NFA_State {
@@ -60,12 +91,12 @@ impl NFA_State {
 }
 
 impl DFA_State {
-    pub fn new(id: usize, equivalent_nfa_states: Vec<StateID>) -> Self {
+    pub fn new(id: usize, equivalent_nfa_states: Vec<StateID>, accepting: bool) -> Self {
         Self {
             id: StateID(id),
             equivalent_nfa_states,
             transitions: vec![],
-            accepting: false,
+            accepting,
         }
     }
 }
@@ -89,7 +120,7 @@ impl Regex {
             raw_regex: String::new(),
             tokenized_regex: Vec::<Symbol>::new(),
             final_nfa: NFA::new(StateID(0), StateID(0)),
-            alphabet: Vec::<char>::new(),
+            alphabet: HashSet::<Transit>::new(),
         }
     }
 
@@ -101,7 +132,7 @@ impl Regex {
         self.raw_regex = regex.to_string();
 
         self.process_regex();
-        self.parse_regex(); // also creates the nfa
+        self.parse_regex();
         self.nfa_to_dfa();
         self.reduce_dfa();
         self.clean();
@@ -113,7 +144,43 @@ impl Regex {
         todo!()
     }
 
-    pub fn find(&mut self, s: &str) -> bool {
+    /*
+     * Checks if the string is an exact match to the regex.
+     */
+    pub fn compare(&self, s: &str) -> bool {
+        let mut state = &self.dfa_states[0];
+
+        for c in s.chars() {
+            let mut reject_flag = true;
+
+            for transition in state.transitions.iter() {
+                let mut transit_flag = false;
+
+                match transition.0 {
+                    Transit::Any      => transit_flag = true,
+                    Transit::Digit    => transit_flag = c.is_digit(10),
+                    Transit::NonDigit => transit_flag = !c.is_digit(10),
+                    Transit::Alpha    => transit_flag = c.is_alphabetic(),
+
+                    Transit::Char(ch) => transit_flag = c == ch,
+                }
+
+                if transit_flag {
+                    state = &self.dfa_states[transition.1.0];
+                    reject_flag = false;
+                    break;
+                }
+            }
+
+            if reject_flag {
+                return false;
+            } 
+        }
+
+        return state.accepting;
+    }
+
+    pub fn search(&self, s: &str) -> bool {
         todo!()
     }
 
@@ -121,8 +188,85 @@ impl Regex {
         todo!()
     }
 
+    /*
+     * This function deletes all the unused information used to create the
+     * minimized DFA. This includes the NFA.
+     */
+    fn clean(&mut self) {
+        self.nfa_states.clear();
+        self.tokenized_regex.clear();
+    }
+
+    /*
+     * Reduce the dfa by combining matching non accept states,
+     * and matching accept states.
+     */
     fn reduce_dfa(&mut self) {
-        todo!()
+        let mut states_to_replace = Vec::<(StateID, StateID)>::new();
+
+        // find states to replace
+        for x in 0..self.dfa_states.len() {
+            for y in (x+1)..self.dfa_states.len() {
+                let state_x = &self.dfa_states[x];
+                let state_y = &self.dfa_states[y];
+
+                if state_x.accepting == state_y.accepting
+                    && state_x.transitions == state_y.transitions {
+
+                    let mut already_replaced = false;
+                    for replacement in states_to_replace.iter() {
+                        if replacement.0 == state_x.id {
+                            already_replaced = true;
+                        }
+                    }
+                    if already_replaced {
+                        continue;
+                    }
+
+                    // to keep the start state at dfa_states[0]
+                    // always replace the higher id with the lower id
+                    states_to_replace.push((state_y.id, state_x.id));
+                }
+            }
+        }
+
+        // replace states (replace id_a with id_b)
+        for (id_a, id_b) in states_to_replace {
+            let mut remove_index = 0;
+
+            for i in 0..self.dfa_states.len() {
+                if self.dfa_states[i].id == id_a {
+                    remove_index = i;
+                    continue;
+                }
+
+                for transition in self.dfa_states[i].transitions.iter_mut() {
+                    if transition.1 == id_a {
+                        transition.1 = id_b;
+                    }
+                }
+            }
+
+            self.dfa_states.remove(remove_index);
+        }
+
+        // readjust table so that state ids match their index
+        for i in 0..self.dfa_states.len() {
+            if i == self.dfa_states[i].id.0 {
+                continue;
+            } 
+
+            let old_id = self.dfa_states[i].id;
+            self.dfa_states[i].id = StateID(i);
+            for k in 0..self.dfa_states.len() {
+                for transition in self.dfa_states[k].transitions.iter_mut() {
+                    if transition.1 == old_id {
+                        transition.1 = StateID(i);
+                    }
+                }
+            }
+        }
+
     }
 
     /*
@@ -138,36 +282,37 @@ impl Regex {
      * by a single transition on a certain letter.
      */
     fn nfa_to_dfa(&mut self) {
-        let start_epsilon_closure = self.epsilon_closure(vec![self.final_nfa.start]);
-        let dfa_start_state = DFA_State::new(self.dfa_states.len(), start_epsilon_closure);
-        let dfa_reject_state = DFA_State::new(self.dfa_states.len(), vec![]);
-        let dfa_reject_state_id = dfa_reject_state.id;
+        let nfa_start_states = self.epsilon_closure(vec![self.final_nfa.start]);
+        let accepting = nfa_start_states.contains(&self.final_nfa.accept);
+        let dfa_start_state = DFA_State::new(self.dfa_states.len(), nfa_start_states, accepting);
         let mut prev_added_states = vec![dfa_start_state.id];
         let mut next_added_states = Vec::<StateID>::new();
-        let mut add_flag = false;
         let mut dfa_states = Vec::<DFA_State>::new();
+        let mut add_flag = false;
 
-        self.dfa_states.push(dfa_start_state);
-        self.dfa_states.push(dfa_reject_state);
+        dfa_states.push(dfa_start_state);
 
         loop {
             for dfa_state_id in prev_added_states.iter() {
-                for letter in self.alphabet.iter() {
-                    let nfa_transition_states = self.nfa_transitions(*letter, &dfa_states[dfa_state_id.0].equivalent_nfa_states);
+                for transit in self.alphabet.iter() {
+                    let transition_ids = self.nfa_transitions(*transit, &dfa_states[dfa_state_id.0].equivalent_nfa_states);
+                    let nfa_state_ids = self.epsilon_closure(transition_ids);
+                    let accepting = nfa_state_ids.contains(&self.final_nfa.accept);
 
-                    if nfa_transition_states.is_empty() {
-                        dfa_states[dfa_state_id.0].transitions.push((*letter, dfa_reject_state_id));
+                    if nfa_state_ids.is_empty() {
+                        continue;
                     }
 
-                    if let Some(state_id) = self.find_dfa_state(&nfa_transition_states) {
-                        dfa_states[dfa_state_id.0].transitions.push((*letter, state_id));
-                    } else {
-                        let new_state = DFA_State::new(dfa_states.len(), nfa_transition_states);
-
-                        add_flag = true;
-                        dfa_states[dfa_state_id.0].transitions.push((*letter, new_state.id));
-                        next_added_states.push(new_state.id);
+                    if let Some(state_id) = self.find_dfa_state(&dfa_states, &nfa_state_ids) {
+                        dfa_states[dfa_state_id.0].transitions.push((*transit, state_id));
+                        continue;
                     }
+
+                    let new_state = DFA_State::new(dfa_states.len(), nfa_state_ids, accepting);
+                    add_flag = true;
+                    dfa_states[dfa_state_id.0].transitions.push((*transit, new_state.id));
+                    next_added_states.push(new_state.id);
+                    dfa_states.push(new_state);
                 }
             }
 
@@ -184,21 +329,12 @@ impl Regex {
     }
 
     /*
-     * This function deletes all the unused information used to create the
-     * minimized DFA. This includes the NFA.
-     *
-     */
-    fn clean(&mut self) {
-        todo!()
-    }
-
-    /*
      * Given a set of NFA state ids, find a dfa state with those matching
      * NFA state ids and return its ID. Each DFA state has a unqiue set 
      * of NFA state ids.
      */
-    fn find_dfa_state(&self, nfa_state_ids: &Vec<StateID>) -> Option<StateID> {
-        for state in self.dfa_states.iter() {
+    fn find_dfa_state(&self, dfa_states: &Vec<DFA_State>, nfa_state_ids: &Vec<StateID>) -> Option<StateID> {
+        for state in dfa_states.iter() {
             if state.equivalent_nfa_states.len() != nfa_state_ids.len() {
                 continue;
             }
@@ -236,7 +372,7 @@ impl Regex {
                 for transition in state.transitions.iter() {
                     match transition.0 {
                         None => {
-                            if closure.contains(&transition.1) {
+                            if !closure.contains(&transition.1) {
                                 closure.push(transition.1);
                                 next_added_states.push(transition.1);
                                 add_flag = true;
@@ -264,7 +400,7 @@ impl Regex {
      * to know all the possible states an NFA could be in after reading 
      * a certain input character.
      */
-    fn nfa_transitions(&self, c: char, nfa_state_ids: &Vec<StateID>) -> Vec<StateID> {
+    fn nfa_transitions(&self, transit: Transit, nfa_state_ids: &Vec<StateID>) -> Vec<StateID> {
         let mut transitions = Vec::<StateID>::new();
 
         for id in nfa_state_ids {
@@ -272,8 +408,8 @@ impl Regex {
 
             for transition in state.transitions.iter() {
                 match transition.0 {
-                    Some(ch) => {
-                        if ch == c {
+                    Some(other_transit) => {
+                        if transit == other_transit {
                             transitions.push(transition.1);
                         }
                     }
@@ -312,10 +448,19 @@ impl Regex {
                 if concat_flag {
                     self.tokenized_regex.push(Symbol::Op(Operator::Concat));
                 }
+
+                let transit: Transit;
+                match c {
+                    'd' => transit = Transit::Digit,
+                    'D' => transit = Transit::NonDigit,
+                    'l' => transit = Transit::Alpha,
+                    _  => transit = Transit::Char(c),
+                }
+
                 concat_flag = true;
                 escape_flag = false;
-                self.tokenized_regex.push(Symbol::Input(c));
-                // add to alphabet
+                self.tokenized_regex.push(Symbol::Transit(transit));
+                self.alphabet.insert(transit);
                 continue
             }
 
@@ -324,17 +469,36 @@ impl Regex {
                 continue;
             }
 
+            if c == '.' {
+                // if that last token was a star, union or left paren error
+                concat_flag = true;
+                self.alphabet.insert(Transit::Any);
+                self.tokenized_regex.push(Symbol::Transit(Transit::Any));
+                continue;
+            } 
             if c == '*' {
                 // if that last token was a star, union or left paren error
                 concat_flag = true;
                 self.tokenized_regex.push(Symbol::Op(Operator::Star));
-                return;
+                continue;
+            } 
+            if c == '+' {
+                // if that last token was a star, union or left paren error
+                concat_flag = true;
+                self.tokenized_regex.push(Symbol::Op(Operator::Plus));
+                continue;
+            } 
+            if c == '?' {
+                // if that last token was a star, union or left paren error
+                concat_flag = true;
+                self.tokenized_regex.push(Symbol::Op(Operator::Question));
+                continue;
             } 
             if c == '|' {
                 // if that last token was a |, or left paren error
                 concat_flag = false;
                 self.tokenized_regex.push(Symbol::Op(Operator::Union));
-                return;
+                continue;
             }
             if c == '(' {
                 if concat_flag {
@@ -342,13 +506,13 @@ impl Regex {
                 }
                 concat_flag = false;
                 self.tokenized_regex.push(Symbol::Op(Operator::LeftParen));
-                return;
+                continue;
             }
             if c == ')' {
                 // if the last token was a left paren  or | error
                 concat_flag = true;
                 self.tokenized_regex.push(Symbol::Op(Operator::RightParen));
-                return;
+                continue;
             }
 
             if concat_flag {
@@ -356,11 +520,16 @@ impl Regex {
             }
 
             concat_flag = true;
-            // add to alphabet
-            self.tokenized_regex.push(Symbol::Input(c));
+            let transit = Transit::Char(c);
+            self.alphabet.insert(transit);
+            self.tokenized_regex.push(Symbol::Transit(transit));
         }
     }
 
+    /*
+     * This function turns the regex into a series of tokens. Tokens can either be 'letters' or operators.
+     * Also this function checks the regex for syntax errors.
+     */
     fn parse_regex(&mut self) {
         self.nfa_states.clear();
         self.nfa_stack.clear();
@@ -370,8 +539,8 @@ impl Regex {
             let symbol = self.tokenized_regex[i];
 
             match symbol {
-                Symbol::Input(c) => {
-                    self.push_nfa(c);
+                Symbol::Transit(t) => {
+                    self.push_nfa(t);
                 }
                 Symbol::Op(op) => {
                     if self.operator_stack.is_empty() {
@@ -395,11 +564,15 @@ impl Regex {
                                 self.eval();
                             }
 
-                            self.operator_stack.pop_back(); 
+                            self.operator_stack.push_back(op); 
                         }
                     }
                 }
             }
+        }
+
+        while !self.operator_stack.is_empty() {
+            self.eval();
         }
 
         self.final_nfa = self.nfa_stack.pop_back().unwrap();
@@ -409,9 +582,11 @@ impl Regex {
         let op = self.operator_stack.pop_back().unwrap();
 
         match op {
-            Operator::Star   => self.star(),
-            Operator::Concat => self.concat(),
-            Operator::Union  => self.union(),
+            Operator::Star     => self.star(),
+            Operator::Plus     => self.plus(),
+            Operator::Question => self.question(),
+            Operator::Concat   => self.concat(),
+            Operator::Union    => self.union(),
             _ => todo!("error"),
         }
     }
@@ -422,32 +597,8 @@ impl Regex {
 			Concatenation	- middle
 			Union			- lowest
 	*/
-    fn precedence(&mut self, opLeft: Operator, opRight: Operator) -> bool {
-        if opLeft == opRight {
-            return true;
-        }
-
-        if opLeft == Operator::Star {
-            return false;
-        }
-        if opRight == Operator::Star {
-            return true;
-        }
-        if opLeft == Operator::Concat {
-            return false;
-        }
-        if opRight == Operator::Concat {
-            return true;
-        }
-        if opLeft == Operator::Union {
-            return false;
-        }
-        if opRight == Operator::Union {
-            return true;
-        }
-
-        todo!("error");
-        assert!(false);
+    fn precedence(&mut self, op_left: Operator, op_right: Operator) -> bool {
+        return op_left >= op_right;
     }
 
     fn create_nfa_state(&mut self) -> StateID {
@@ -458,23 +609,15 @@ impl Regex {
         return StateID(self.nfa_states.len() - 1);
     }
 
-    fn create_dfa_state(&mut self, equivalent_nfa_states: Vec<StateID>) -> StateID {
-        let new_state = DFA_State::new(self.dfa_states.len(), equivalent_nfa_states);
-
-        self.dfa_states.push(new_state);
-
-        return StateID(self.dfa_states.len() - 1);
+    fn add_nfa_transition(&mut self, t: Option<Transit>, state_a: StateID, state_b: StateID) {
+        self.nfa_states[state_a.0].transitions.push((t, state_b));
     }
 
-    fn add_nfa_transition(&mut self, c: Option<char>, state_a: StateID, state_b: StateID) {
-        self.nfa_states[state_a.0].transitions.push((c, state_b));
-    }
-
-    fn push_nfa(&mut self, c: char) {
+    fn push_nfa(&mut self, t: Transit) {
         let state_a = self.create_nfa_state();
         let state_b = self.create_nfa_state();
 
-        self.add_nfa_transition(Some(c), state_a, state_b);
+        self.add_nfa_transition(Some(t), state_a, state_b);
 
         self.nfa_stack.push_back(NFA::new(state_a, state_b));
     }
@@ -492,6 +635,9 @@ impl Regex {
         self.nfa_stack.push_back(NFA::new(nfa_a.start, nfa_b.accept));
     }
 
+    /*
+    Match zero or more times
+    */
     fn star(&mut self) {
         let nfa = self.pop().unwrap();
         let state_a = self.create_nfa_state();
@@ -518,6 +664,34 @@ impl Regex {
 
         self.nfa_stack.push_back(NFA::new(state_a, state_b));
     }
+
+    /*
+    Match one or more times
+    */
+    fn plus(&mut self) {
+        let nfa = self.pop().unwrap();
+        let state_a = self.create_nfa_state();
+        let state_b = self.create_nfa_state();
+
+        self.add_nfa_transition(None, nfa.accept, nfa.start);
+        self.add_nfa_transition(None, state_a, nfa.start);
+        self.add_nfa_transition(None, nfa.accept, state_b);
+
+        self.nfa_stack.push_back(NFA::new(state_a, state_b));
+    }
+
+    /*
+    Match one or zero times
+    */
+    fn question(&mut self) {
+        let nfa = self.pop().unwrap();
+        let state_a = self.create_nfa_state();
+
+        self.add_nfa_transition(None, state_a, nfa.start);
+        self.add_nfa_transition(None, state_a, nfa.accept);
+
+        self.nfa_stack.push_back(NFA::new(state_a, nfa.accept));
+    }
 }
 
 #[cfg(test)]
@@ -525,9 +699,171 @@ mod tests {
     use super::*;
 
     #[test]
-    fn simple_regex() {
-        let regex = Regex::from("foobar");
+    fn compare1() {
+        let regex = Regex::from("megaladonkus");
 
-        assert!(true);
+        assert!(!regex.compare(""));
+        assert!(!regex.compare("m"));
+        assert!(!regex.compare("me"));
+        assert!(!regex.compare("meg"));
+        assert!(!regex.compare("mega"));
+        assert!(!regex.compare("megal"));
+        assert!(!regex.compare("megala"));
+        assert!(!regex.compare("megalad"));
+        assert!(!regex.compare("megalado"));
+        assert!(!regex.compare("megaladon"));
+        assert!(!regex.compare("megaladonk"));
+        assert!(!regex.compare("megaladonku"));
+        assert!( regex.compare("megaladonkus")); // MATCH
+        assert!(!regex.compare("megaladonkuss"));
+        assert!(!regex.compare("megaladonkusss"));
+        assert!(!regex.compare("megaladonkussss"));
+    }
+
+    #[test]
+    fn compare2() {
+        //let regex = Regex::from("cheese|please");
+        let regex = Regex::from("cheese|please");
+
+        assert!(!regex.compare("cheeseplease"));
+        assert!(!regex.compare("pleasecheese"));
+        assert!(!regex.compare("chees"));
+        assert!(!regex.compare("pleas"));
+        assert!(!regex.compare("chease"));
+        assert!(!regex.compare(""));
+
+        assert!(regex.compare("cheese"));
+        assert!(regex.compare("please"));
+    }
+
+    #[test]
+    fn compare3() {
+        //let regex = Regex::from("cheese|please");
+        let regex = Regex::from("(foo|bar)*");
+
+        assert!(!regex.compare("fo"));
+        assert!(!regex.compare("ba"));
+        assert!(!regex.compare("fooblah"));
+        assert!(!regex.compare("barblah"));
+
+        assert!(regex.compare(""));
+        assert!(regex.compare("foo"));
+        assert!(regex.compare("bar"));
+        assert!(regex.compare("foofoo"));
+        assert!(regex.compare("barbar"));
+        assert!(regex.compare("foobar"));
+        assert!(regex.compare("barfoo"));
+        assert!(regex.compare("foofoofoo"));
+        assert!(regex.compare("foofoobar"));
+        assert!(regex.compare("foobarfoo"));
+        assert!(regex.compare("foobarbar"));
+        assert!(regex.compare("barfoofoo"));
+        assert!(regex.compare("barfoobar"));
+        assert!(regex.compare("barbarfoo"));
+        assert!(regex.compare("barbarbar"));
+    }
+
+    #[test]
+    fn compare4() {
+        let regex = Regex::from("1*2*3*");
+
+        assert!(regex.compare(""));
+        assert!(regex.compare("1"));
+        assert!(regex.compare("22"));
+        assert!(regex.compare("123"));
+        assert!(regex.compare("333"));
+        assert!(regex.compare("1133"));
+        assert!(regex.compare("11122"));
+        assert!(regex.compare("233333"));
+        assert!(regex.compare("1122233"));
+
+        assert!(!regex.compare("11222334"));
+    }
+    #[test]
+    fn compare5() {
+        let regex = Regex::from("((420)*(69)*(1738)*_)*");
+
+        assert!(regex.compare(""));
+        assert!(regex.compare("_"));
+        assert!(regex.compare("_______"));
+        assert!(regex.compare("______420_____"));
+        assert!(regex.compare("420_"));
+        assert!(regex.compare("69_"));
+        assert!(regex.compare("1738_"));
+        assert!(regex.compare("420__69__1738__"));
+        assert!(regex.compare("1738___420___69___"));
+
+        assert!(!regex.compare("420"));
+        assert!(!regex.compare("69"));
+        assert!(!regex.compare("1738"));
+    }
+
+    #[test]
+    fn int_compare() {
+        let regex = Regex::from("(1|2|3|4|5|6|7|8|9|0)+");
+
+        assert!(regex.compare("654321"));
+        assert!(regex.compare("123456"));
+
+        assert!(!regex.compare(""));
+        assert!(!regex.compare("asdfasdf"));
+    }
+
+    #[test]
+    fn float_compare() {
+        let regex = Regex::from(r#"-?\d+(\.\d+)?"#);
+
+        assert!(regex.compare("654321"));
+        assert!(regex.compare("0.0"));
+        assert!(regex.compare("123.456"));
+        assert!(regex.compare("-123.456"));
+        assert!(regex.compare("0.420420420420420420"));
+
+        assert!(!regex.compare("no"));
+        assert!(!regex.compare("blah blah blah blah"));
+        assert!(!regex.compare("12414..123123"));
+        assert!(!regex.compare("1214."));
+        assert!(!regex.compare("-1214."));
+        assert!(!regex.compare("-."));
+        assert!(!regex.compare("1214.12412."));
+    }
+
+
+    #[test]
+    fn any_compare() {
+        let regex = Regex::from(".*");
+
+        assert!(regex.compare(""));
+        assert!(regex.compare("0.0"));
+        assert!(regex.compare("123.456"));
+        assert!(regex.compare("-123.456"));
+        assert!(regex.compare("0.420420420420420420"));
+        assert!(regex.compare("no"));
+        assert!(regex.compare("blah blah blah blah"));
+        assert!(regex.compare("12414..123123"));
+        assert!(regex.compare("1214."));
+        assert!(regex.compare("-1214."));
+        assert!(regex.compare("-."));
+        assert!(regex.compare("1214.12412."));
+    }
+
+    #[test]
+    fn alpha_compare() {
+        let regex = Regex::from(r#"\l*"#);
+
+        assert!(regex.compare(""));
+        assert!(regex.compare("yay"));
+        assert!(regex.compare("abcdefghijklmnopqrstuvwxyz"));
+
+        assert!(!regex.compare("0.0asdfas"));
+        assert!(!regex.compare("1sdfask23.456"));
+        assert!(!regex.compare("-123.456"));
+        assert!(!regex.compare("0.420420asdfasfdjkkk420420420420"));
+        assert!(!regex.compare("blah blah blah blah"));
+        assert!(!regex.compare("zxcvzozxcv12414..123123"));
+        assert!(!regex.compare("1214."));
+        assert!(!regex.compare("-1214."));
+        assert!(!regex.compare("-."));
+        assert!(!regex.compare("asdfasdsfadf1214.12412."));
     }
 }
