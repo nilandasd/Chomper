@@ -8,6 +8,12 @@ Quantifiers
     * :  zero or more times
     + :  one or more times
     ? :  zero or one times
+    NEXT TO IMPLEMENT _____________
+        {a}   : exactly a times
+        {a,b} : at least a times and not b or more times
+        {a, } : at least a times
+        { ,b} : not b or more times
+    ______________________________
 
 Special Symbols
     \d : 0-9
@@ -24,19 +30,22 @@ Grouping
     a|b : match expression a or b (union)
  */
 
-#[derive(Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 enum Symbol {
     Op(Operator),
     Transit(Transit)
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 enum Transit {
     Char(char),
-    NonDigit,
     Digit,
     Alpha,
-    Any
+    AlphaNumeric,
+    NonAlphaNumeric,
+    NonDigit,
+    NonAlpha,
+    Any,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd)]
@@ -53,12 +62,12 @@ enum Operator {
 #[derive(Copy, Clone, PartialEq)]
 struct StateID(usize);
 
-struct NFA_State {
+struct NFAstate {
     id: StateID,
     transitions: Vec<(Option<Transit>, StateID)>, // None transit == Epsilon Transition
 }
 
-struct DFA_State {
+struct DFAstate {
     id:                    StateID,
     equivalent_nfa_states: Vec<StateID>,
     transitions:           Vec<(Transit, StateID)>, // removed option to remove epsilon transitions
@@ -75,13 +84,13 @@ struct Regex {
     tokenized_regex: Vec<Symbol>,
     operator_stack:  VecDeque<Operator>,
     nfa_stack:       VecDeque<NFA>,
-    nfa_states:      Vec<NFA_State>,    
-    dfa_states:      Vec<DFA_State>,    
+    nfa_states:      Vec<NFAstate>,    
+    dfa_states:      Vec<DFAstate>,    
     final_nfa:       NFA,
-    alphabet:        HashSet<Transit>,
+    current_state:   Option<StateID>,
 }
 
-impl NFA_State {
+impl NFAstate {
     pub fn new(id: usize) -> Self {
         Self {
             id: StateID(id),
@@ -90,7 +99,7 @@ impl NFA_State {
     }
 }
 
-impl DFA_State {
+impl DFAstate {
     pub fn new(id: usize, equivalent_nfa_states: Vec<StateID>, accepting: bool) -> Self {
         Self {
             id: StateID(id),
@@ -113,14 +122,14 @@ impl NFA {
 impl Regex {
     pub fn new() -> Self {
         Self {
-            nfa_states: Vec::<NFA_State>::new(),
-            dfa_states: Vec::<DFA_State>::new(),
-            operator_stack: VecDeque::<Operator>::new(),
-            nfa_stack: VecDeque::<NFA>::new(),
-            raw_regex: String::new(),
+            operator_stack:  VecDeque::<Operator>::new(),
+            nfa_stack:       VecDeque::<NFA>::new(),
+            final_nfa:       NFA::new(StateID(0), StateID(0)),
+            nfa_states:      Vec::<NFAstate>::new(),
+            dfa_states:      Vec::<DFAstate>::new(),
+            raw_regex:       String::new(),
             tokenized_regex: Vec::<Symbol>::new(),
-            final_nfa: NFA::new(StateID(0), StateID(0)),
-            alphabet: HashSet::<Transit>::new(),
+            current_state:   None
         }
     }
 
@@ -140,8 +149,46 @@ impl Regex {
         return self;
     }
 
+    fn match_transit(c: &char, transit: &Transit) -> bool {
+        match transit {
+            Transit::Any             => return true,
+            Transit::Digit           => return  c.is_digit(10),
+            Transit::NonDigit        => return !c.is_digit(10),
+            Transit::Alpha           => return  c.is_alphabetic(),
+            Transit::NonAlpha        => return !c.is_alphabetic(),
+            Transit::AlphaNumeric    => return  c.is_digit(10) || c.is_alphabetic(),
+            Transit::NonAlphaNumeric => return !c.is_digit(10) && !c.is_alphabetic(),
+            Transit::Char(ch)  =>       return *c == *ch,
+        }
+    }
+
+    /*
+     *  This function is for giving a regex one character at a time, changing
+     *  the state of the internal DFA, and returning true if the DFA has not
+     *  rejected the input character given the current state. If no state is set
+     *  or the DFA rejects the input, than it returns false.
+     */
     pub fn feed(&mut self, c: char) -> bool {
-        todo!()
+        match self.current_state {
+            Some(sid) => {
+                let state = &self.dfa_states[sid.0];
+
+                for transition in state.transitions.iter() {
+                    if Self::match_transit(&c, &transition.0) {
+                        self.current_state = Some(transition.1);
+                        return true;
+                    }
+                }
+
+                self.current_state = None;
+                return false;
+            }
+            None => { return false }
+        }
+    }
+
+    pub fn restart(&mut self) {
+        self.current_state = Some(StateID(0));
     }
 
     /*
@@ -154,18 +201,7 @@ impl Regex {
             let mut reject_flag = true;
 
             for transition in state.transitions.iter() {
-                let mut transit_flag = false;
-
-                match transition.0 {
-                    Transit::Any      => transit_flag = true,
-                    Transit::Digit    => transit_flag = c.is_digit(10),
-                    Transit::NonDigit => transit_flag = !c.is_digit(10),
-                    Transit::Alpha    => transit_flag = c.is_alphabetic(),
-
-                    Transit::Char(ch) => transit_flag = c == ch,
-                }
-
-                if transit_flag {
+                if Self::match_transit(&c, &transition.0) {
                     state = &self.dfa_states[transition.1.0];
                     reject_flag = false;
                     break;
@@ -178,14 +214,6 @@ impl Regex {
         }
 
         return state.accepting;
-    }
-
-    pub fn search(&self, s: &str) -> bool {
-        todo!()
-    }
-
-    pub fn reset(&mut self) -> Self {
-        todo!()
     }
 
     /*
@@ -266,7 +294,26 @@ impl Regex {
                 }
             }
         }
+    }
 
+    /*
+     * Finds all possible transits from a aset of nfa states
+     */
+    fn getTransits(&self, states: &Vec<StateID>) -> Vec<Transit> {
+        let mut result = Vec::<Transit>::new();
+
+        for stateid in states.iter() {
+            for transit in  self.nfa_states[stateid.0].transitions.iter() {
+                match transit.0 {
+                    Some(t) => result.push(t),
+                    None => {}
+                }
+            }
+        }
+
+        result.sort();
+
+        return result;
     }
 
     /*
@@ -284,17 +331,19 @@ impl Regex {
     fn nfa_to_dfa(&mut self) {
         let nfa_start_states = self.epsilon_closure(vec![self.final_nfa.start]);
         let accepting = nfa_start_states.contains(&self.final_nfa.accept);
-        let dfa_start_state = DFA_State::new(self.dfa_states.len(), nfa_start_states, accepting);
+        let dfa_start_state = DFAstate::new(self.dfa_states.len(), nfa_start_states, accepting);
         let mut prev_added_states = vec![dfa_start_state.id];
         let mut next_added_states = Vec::<StateID>::new();
-        let mut dfa_states = Vec::<DFA_State>::new();
+        let mut dfa_states = Vec::<DFAstate>::new();
         let mut add_flag = false;
 
         dfa_states.push(dfa_start_state);
 
         loop {
             for dfa_state_id in prev_added_states.iter() {
-                for transit in self.alphabet.iter() {
+                let possible_transits = self.getTransits(&dfa_states[dfa_state_id.0].equivalent_nfa_states);
+
+                for transit in possible_transits.iter() {
                     let transition_ids = self.nfa_transitions(*transit, &dfa_states[dfa_state_id.0].equivalent_nfa_states);
                     let nfa_state_ids = self.epsilon_closure(transition_ids);
                     let accepting = nfa_state_ids.contains(&self.final_nfa.accept);
@@ -308,7 +357,7 @@ impl Regex {
                         continue;
                     }
 
-                    let new_state = DFA_State::new(dfa_states.len(), nfa_state_ids, accepting);
+                    let new_state = DFAstate::new(dfa_states.len(), nfa_state_ids, accepting);
                     add_flag = true;
                     dfa_states[dfa_state_id.0].transitions.push((*transit, new_state.id));
                     next_added_states.push(new_state.id);
@@ -333,7 +382,7 @@ impl Regex {
      * NFA state ids and return its ID. Each DFA state has a unqiue set 
      * of NFA state ids.
      */
-    fn find_dfa_state(&self, dfa_states: &Vec<DFA_State>, nfa_state_ids: &Vec<StateID>) -> Option<StateID> {
+    fn find_dfa_state(&self, dfa_states: &Vec<DFAstate>, nfa_state_ids: &Vec<StateID>) -> Option<StateID> {
         for state in dfa_states.iter() {
             if state.equivalent_nfa_states.len() != nfa_state_ids.len() {
                 continue;
@@ -454,13 +503,15 @@ impl Regex {
                     'd' => transit = Transit::Digit,
                     'D' => transit = Transit::NonDigit,
                     'l' => transit = Transit::Alpha,
-                    _  => transit = Transit::Char(c),
+                    'L' => transit = Transit::NonAlpha,
+                    'a' => transit = Transit::AlphaNumeric,
+                    'A' => transit = Transit::NonAlphaNumeric,
+                     _  => transit = Transit::Char(c),
                 }
 
                 concat_flag = true;
                 escape_flag = false;
                 self.tokenized_regex.push(Symbol::Transit(transit));
-                self.alphabet.insert(transit);
                 continue
             }
 
@@ -471,8 +522,11 @@ impl Regex {
 
             if c == '.' {
                 // if that last token was a star, union or left paren error
+                if concat_flag {
+                    self.tokenized_regex.push(Symbol::Op(Operator::Concat));
+                }
+
                 concat_flag = true;
-                self.alphabet.insert(Transit::Any);
                 self.tokenized_regex.push(Symbol::Transit(Transit::Any));
                 continue;
             } 
@@ -521,7 +575,6 @@ impl Regex {
 
             concat_flag = true;
             let transit = Transit::Char(c);
-            self.alphabet.insert(transit);
             self.tokenized_regex.push(Symbol::Transit(transit));
         }
     }
@@ -602,7 +655,7 @@ impl Regex {
     }
 
     fn create_nfa_state(&mut self) -> StateID {
-        let new_state = NFA_State::new(self.nfa_states.len());
+        let new_state = NFAstate::new(self.nfa_states.len());
 
         self.nfa_states.push(new_state);
 
@@ -807,6 +860,7 @@ mod tests {
 
         assert!(!regex.compare(""));
         assert!(!regex.compare("asdfasdf"));
+        assert!(!regex.compare("1234asdf"));
     }
 
     #[test]
@@ -825,6 +879,25 @@ mod tests {
         assert!(!regex.compare("1214."));
         assert!(!regex.compare("-1214."));
         assert!(!regex.compare("-."));
+        assert!(!regex.compare("1214.12412."));
+    }
+
+    #[test]
+    fn string_compare() {
+        let regex = Regex::from(r#"".*""#);
+
+        assert!(regex.compare("\"654321\""));
+        assert!(regex.compare("\"this is a test to match on strings\""));
+        assert!(regex.compare("\"\""));
+        assert!(regex.compare("\"s\""));
+        assert!(regex.compare("\"sasdfa235908adf(*!&^@$!@%_(*&))@(#%\""));
+
+        assert!(!regex.compare("\"no"));
+        assert!(!regex.compare("n\"o\""));
+        assert!(!regex.compare("no\""));
+        assert!(!regex.compare("blah \"blah\" blah blah"));
+        assert!(!regex.compare("blah blah blah blah"));
+        assert!(!regex.compare("1214."));
         assert!(!regex.compare("1214.12412."));
     }
 
