@@ -7,6 +7,7 @@ description = "A regex library designed to be used in a lexer"
 homepage = "https://github.com/nilandasd/Chomp"
 include = ["/src"]
 readme = "README.md"
+license = "MIT"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
