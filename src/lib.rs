@@ -539,7 +539,7 @@ impl Chomper {
             Operator::Question => self.eval_question(),
             Operator::Concat => self.eval_concat(),
             Operator::Union => self.eval_union(),
-            _ => assert!(false), // unreachable
+            _ => panic!("syntax error!"), // unreachable
         }
     }
 
