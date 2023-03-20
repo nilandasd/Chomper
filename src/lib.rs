@@ -1,7 +1,6 @@
 #![allow(dead_code)]
 
 use std::collections::VecDeque;
-use std::collections::HashSet;
 
 /*
 Quantifiers
@@ -133,20 +132,23 @@ impl Regex {
         }
     }
 
-    pub fn from(regex: &str) -> Self {
+    pub fn from(regex: &str) -> Option<Self> {
         return Self::new().set_pattern(regex);
     }
 
-    pub fn set_pattern(mut self, regex: &str) -> Self {
+    pub fn set_pattern(mut self, regex: &str) -> Option<Self> {
         self.raw_regex = regex.to_string();
 
-        self.process_regex();
+        if !self.process_regex() {
+            return None;
+        }
+
         self.parse_regex();
         self.nfa_to_dfa();
         self.reduce_dfa();
         self.clean();
 
-        return self;
+        return Some(self);
     }
 
     fn match_transit(c: &char, transit: &Transit) -> bool {
@@ -299,7 +301,7 @@ impl Regex {
     /*
      * Finds all possible transits from a aset of nfa states
      */
-    fn getTransits(&self, states: &Vec<StateID>) -> Vec<Transit> {
+    fn get_transits(&self, states: &Vec<StateID>) -> Vec<Transit> {
         let mut result = Vec::<Transit>::new();
 
         for stateid in states.iter() {
@@ -341,7 +343,7 @@ impl Regex {
 
         loop {
             for dfa_state_id in prev_added_states.iter() {
-                let possible_transits = self.getTransits(&dfa_states[dfa_state_id.0].equivalent_nfa_states);
+                let possible_transits = self.get_transits(&dfa_states[dfa_state_id.0].equivalent_nfa_states);
 
                 for transit in possible_transits.iter() {
                     let transition_ids = self.nfa_transitions(*transit, &dfa_states[dfa_state_id.0].equivalent_nfa_states);
@@ -470,115 +472,6 @@ impl Regex {
         return transitions;
     }
 
-    /* This function has 3 main functionalities:
-     *    1. Escape characters using backslash.
-     *    2. Add concatenation symbols into the string where they are implicit.
-     *    3. Detect syntax errors.
-     *    4. Convert all operators down to union, concat, and/or star operators.
-     *
-     * While performing these functions it fills the tokenized_regex vec to be
-     * ready for parsing.
-     *
-     * When to insert a concat operator:
-     *    1. aa
-     *    2. a(
-     *    3. )a
-     *    4. )(
-     *    5. *a
-     *    6. *(
-     */
-    fn process_regex(&mut self) {
-        let mut escape_flag = false;
-        let mut concat_flag = false;
-        let mut depth = 0;
-
-        for c in self.raw_regex.chars() {
-            if escape_flag {
-                if concat_flag {
-                    self.tokenized_regex.push(Symbol::Op(Operator::Concat));
-                }
-
-                let transit: Transit;
-                match c {
-                    'd' => transit = Transit::Digit,
-                    'D' => transit = Transit::NonDigit,
-                    'l' => transit = Transit::Alpha,
-                    'L' => transit = Transit::NonAlpha,
-                    'a' => transit = Transit::AlphaNumeric,
-                    'A' => transit = Transit::NonAlphaNumeric,
-                     _  => transit = Transit::Char(c),
-                }
-
-                concat_flag = true;
-                escape_flag = false;
-                self.tokenized_regex.push(Symbol::Transit(transit));
-                continue
-            }
-
-            if c == '\\' {
-                escape_flag = true;
-                continue;
-            }
-
-            if c == '.' {
-                // if that last token was a star, union or left paren error
-                if concat_flag {
-                    self.tokenized_regex.push(Symbol::Op(Operator::Concat));
-                }
-
-                concat_flag = true;
-                self.tokenized_regex.push(Symbol::Transit(Transit::Any));
-                continue;
-            } 
-            if c == '*' {
-                // if that last token was a star, union or left paren error
-                concat_flag = true;
-                self.tokenized_regex.push(Symbol::Op(Operator::Star));
-                continue;
-            } 
-            if c == '+' {
-                // if that last token was a star, union or left paren error
-                concat_flag = true;
-                self.tokenized_regex.push(Symbol::Op(Operator::Plus));
-                continue;
-            } 
-            if c == '?' {
-                // if that last token was a star, union or left paren error
-                concat_flag = true;
-                self.tokenized_regex.push(Symbol::Op(Operator::Question));
-                continue;
-            } 
-            if c == '|' {
-                // if that last token was a |, or left paren error
-                concat_flag = false;
-                self.tokenized_regex.push(Symbol::Op(Operator::Union));
-                continue;
-            }
-            if c == '(' {
-                if concat_flag {
-                    self.tokenized_regex.push(Symbol::Op(Operator::Concat));
-                }
-                concat_flag = false;
-                self.tokenized_regex.push(Symbol::Op(Operator::LeftParen));
-                continue;
-            }
-            if c == ')' {
-                // if the last token was a left paren  or | error
-                concat_flag = true;
-                self.tokenized_regex.push(Symbol::Op(Operator::RightParen));
-                continue;
-            }
-
-            if concat_flag {
-                self.tokenized_regex.push(Symbol::Op(Operator::Concat));
-            }
-
-            concat_flag = true;
-            let transit = Transit::Char(c);
-            self.tokenized_regex.push(Symbol::Transit(transit));
-        }
-    }
-
     /*
      * This function turns the regex into a series of tokens. Tokens can either be 'letters' or operators.
      * Also this function checks the regex for syntax errors.
@@ -635,11 +528,11 @@ impl Regex {
         let op = self.operator_stack.pop_back().unwrap();
 
         match op {
-            Operator::Star     => self.star(),
-            Operator::Plus     => self.plus(),
-            Operator::Question => self.question(),
-            Operator::Concat   => self.concat(),
-            Operator::Union    => self.union(),
+            Operator::Star     => self.eval_star(),
+            Operator::Plus     => self.eval_plus(),
+            Operator::Question => self.eval_question(),
+            Operator::Concat   => self.eval_concat(),
+            Operator::Union    => self.eval_union(),
             _ => todo!("error"),
         }
     }
@@ -675,13 +568,9 @@ impl Regex {
         self.nfa_stack.push_back(NFA::new(state_a, state_b));
     }
 
-    fn pop(&mut self) -> Option<NFA> {
-        return self.nfa_stack.pop_back();
-    }
-
-    fn concat(&mut self) {
-        let nfa_b = self.pop().unwrap();
-        let nfa_a = self.pop().unwrap();
+    fn eval_concat(&mut self) {
+        let nfa_b = self.nfa_stack.pop_back().unwrap();
+        let nfa_a = self.nfa_stack.pop_back().unwrap();
 
         self.add_nfa_transition(None, nfa_a.accept, nfa_b.start);
 
@@ -691,8 +580,8 @@ impl Regex {
     /*
     Match zero or more times
     */
-    fn star(&mut self) {
-        let nfa = self.pop().unwrap();
+    fn eval_star(&mut self) {
+        let nfa = self.nfa_stack.pop_back().unwrap();
         let state_a = self.create_nfa_state();
         let state_b = self.create_nfa_state();
 
@@ -704,9 +593,9 @@ impl Regex {
         self.nfa_stack.push_back(NFA::new(state_a, state_b));
     }
 
-    fn union(&mut self) {
-        let nfa_b = self.pop().unwrap();
-        let nfa_a = self.pop().unwrap();
+    fn eval_union(&mut self) {
+        let nfa_b = self.nfa_stack.pop_back().unwrap();
+        let nfa_a = self.nfa_stack.pop_back().unwrap();
         let state_a = self.create_nfa_state();
         let state_b = self.create_nfa_state();
 
@@ -721,8 +610,8 @@ impl Regex {
     /*
     Match one or more times
     */
-    fn plus(&mut self) {
-        let nfa = self.pop().unwrap();
+    fn eval_plus(&mut self) {
+        let nfa = self.nfa_stack.pop_back().unwrap();
         let state_a = self.create_nfa_state();
         let state_b = self.create_nfa_state();
 
@@ -736,14 +625,181 @@ impl Regex {
     /*
     Match one or zero times
     */
-    fn question(&mut self) {
-        let nfa = self.pop().unwrap();
+    fn eval_question(&mut self) {
+        let nfa = self.nfa_stack.pop_back().unwrap();
         let state_a = self.create_nfa_state();
 
         self.add_nfa_transition(None, state_a, nfa.start);
         self.add_nfa_transition(None, state_a, nfa.accept);
 
         self.nfa_stack.push_back(NFA::new(state_a, nfa.accept));
+    }
+
+    /* This function has 3 main functionalities:
+     *    1. Escape characters using backslash.
+     *    2. Add concatenation symbols into the string where they are implicit.
+     *    3. Detect syntax errors.
+     *    4. Convert all operators down to union, concat, and/or star operators.
+     *
+     * While performing these functions it fills the tokenized_regex vec to be
+     * ready for parsing.
+     *
+     * When to insert a concat operator:
+     *    1. aa
+     *    2. a(
+     *    3. )a
+     *    4. )(
+     *    5. *a
+     *    6. *(
+     */
+    fn process_regex(&mut self) -> bool {
+        let mut escape_flag = false;
+        let mut concat_flag = false;
+        let mut depth = 0;
+
+        for c in self.raw_regex.chars() {
+            if escape_flag {
+                if concat_flag {
+                    self.tokenized_regex.push(Symbol::Op(Operator::Concat));
+                }
+
+                let transit: Transit;
+                match c {
+                    'd' => transit = Transit::Digit,
+                    'D' => transit = Transit::NonDigit,
+                    'l' => transit = Transit::Alpha,
+                    'L' => transit = Transit::NonAlpha,
+                    'a' => transit = Transit::AlphaNumeric,
+                    'A' => transit = Transit::NonAlphaNumeric,
+                     _  => transit = Transit::Char(c),
+                }
+
+                concat_flag = true;
+                escape_flag = false;
+                self.tokenized_regex.push(Symbol::Transit(transit));
+                continue
+            }
+
+            if c == '\\' {
+                escape_flag = true;
+                continue;
+            }
+
+            if c == '.' {
+                if concat_flag {
+                    self.tokenized_regex.push(Symbol::Op(Operator::Concat));
+                }
+
+                concat_flag = true;
+                self.tokenized_regex.push(Symbol::Transit(Transit::Any));
+                continue;
+            } 
+            if c == '*' {
+                match self.tokenized_regex.last() { 
+                    Some(s) => {
+                        if *s == Symbol::Op(Operator::Union)
+                        || *s == Symbol::Op(Operator::LeftParen)
+                        || *s == Symbol::Op(Operator::Star)
+                        || *s == Symbol::Op(Operator::Plus)
+                        || *s == Symbol::Op(Operator::Question) {
+                            return false;
+                        }
+                    }
+                    None => return false,
+                }
+                concat_flag = true;
+                self.tokenized_regex.push(Symbol::Op(Operator::Star));
+                continue;
+            } 
+            if c == '+' {
+                match self.tokenized_regex.last() { 
+                    Some(s) => {
+                        if *s == Symbol::Op(Operator::Union)
+                        || *s == Symbol::Op(Operator::LeftParen)
+                        || *s == Symbol::Op(Operator::Star)
+                        || *s == Symbol::Op(Operator::Plus)
+                        || *s == Symbol::Op(Operator::Question) {
+                            return false;
+                        }
+                    }
+                    None => return false,
+                }
+                concat_flag = true;
+                self.tokenized_regex.push(Symbol::Op(Operator::Plus));
+                continue;
+            } 
+            if c == '?' {
+                match self.tokenized_regex.last() { 
+                    Some(s) => {
+                        if *s == Symbol::Op(Operator::Union)
+                        || *s == Symbol::Op(Operator::LeftParen)
+                        || *s == Symbol::Op(Operator::Star)
+                        || *s == Symbol::Op(Operator::Plus)
+                        || *s == Symbol::Op(Operator::Question) {
+                            return false;
+                        }
+                    }
+                    None => return false,
+                }
+                concat_flag = true;
+                self.tokenized_regex.push(Symbol::Op(Operator::Question));
+                continue;
+            } 
+            if c == '|' {
+                match self.tokenized_regex.last() {
+                    Some(s) => {
+                        if *s == Symbol::Op(Operator::Union)
+                        || *s == Symbol::Op(Operator::LeftParen) {
+                            return false;
+                    }
+                    }
+                    None => return false,
+                }
+                concat_flag = false;
+                self.tokenized_regex.push(Symbol::Op(Operator::Union));
+                continue;
+            }
+            if c == '(' {
+                depth += 1;
+
+                if concat_flag {
+                    self.tokenized_regex.push(Symbol::Op(Operator::Concat));
+                }
+                concat_flag = false;
+                self.tokenized_regex.push(Symbol::Op(Operator::LeftParen));
+                continue;
+            }
+            if c == ')' {
+                depth -= 1;
+                match self.tokenized_regex.last() {
+                    Some(s) => {
+                        if *s == Symbol::Op(Operator::Union)
+                        || *s == Symbol::Op(Operator::LeftParen) {
+                            return false;
+                    }
+                    }
+                    None => return false,
+                }
+
+                concat_flag = true;
+                self.tokenized_regex.push(Symbol::Op(Operator::RightParen));
+                continue;
+            }
+
+            if concat_flag {
+                self.tokenized_regex.push(Symbol::Op(Operator::Concat));
+            }
+
+            concat_flag = true;
+            let transit = Transit::Char(c);
+            self.tokenized_regex.push(Symbol::Transit(transit));
+        }
+
+        if depth != 0 {
+            return false;
+        }
+        
+        return true;
     }
 }
 
@@ -753,7 +809,7 @@ mod tests {
 
     #[test]
     fn compare1() {
-        let regex = Regex::from("megaladonkus");
+        let regex = Regex::from("megaladonkus").unwrap();
 
         assert!(!regex.compare(""));
         assert!(!regex.compare("m"));
@@ -776,7 +832,7 @@ mod tests {
     #[test]
     fn compare2() {
         //let regex = Regex::from("cheese|please");
-        let regex = Regex::from("cheese|please");
+        let regex = Regex::from("cheese|please").unwrap();
 
         assert!(!regex.compare("cheeseplease"));
         assert!(!regex.compare("pleasecheese"));
@@ -792,7 +848,7 @@ mod tests {
     #[test]
     fn compare3() {
         //let regex = Regex::from("cheese|please");
-        let regex = Regex::from("(foo|bar)*");
+        let regex = Regex::from("(foo|bar)*").unwrap();
 
         assert!(!regex.compare("fo"));
         assert!(!regex.compare("ba"));
@@ -818,7 +874,7 @@ mod tests {
 
     #[test]
     fn compare4() {
-        let regex = Regex::from("1*2*3*");
+        let regex = Regex::from("1*2*3*").unwrap();
 
         assert!(regex.compare(""));
         assert!(regex.compare("1"));
@@ -834,7 +890,7 @@ mod tests {
     }
     #[test]
     fn compare5() {
-        let regex = Regex::from("((420)*(69)*(1738)*_)*");
+        let regex = Regex::from("((420)*(69)*(1738)*_)*").unwrap();
 
         assert!(regex.compare(""));
         assert!(regex.compare("_"));
@@ -853,7 +909,7 @@ mod tests {
 
     #[test]
     fn int_compare() {
-        let regex = Regex::from("(1|2|3|4|5|6|7|8|9|0)+");
+        let regex = Regex::from("(1|2|3|4|5|6|7|8|9|0)+").unwrap();
 
         assert!(regex.compare("654321"));
         assert!(regex.compare("123456"));
@@ -865,7 +921,7 @@ mod tests {
 
     #[test]
     fn float_compare() {
-        let regex = Regex::from(r#"-?\d+(\.\d+)?"#);
+        let regex = Regex::from(r#"-?\d+(\.\d+)?"#).unwrap();
 
         assert!(regex.compare("654321"));
         assert!(regex.compare("0.0"));
@@ -884,7 +940,7 @@ mod tests {
 
     #[test]
     fn string_compare() {
-        let regex = Regex::from(r#"".*""#);
+        let regex = Regex::from(r#"".*""#).unwrap();
 
         assert!(regex.compare("\"654321\""));
         assert!(regex.compare("\"this is a test to match on strings\""));
@@ -904,7 +960,7 @@ mod tests {
 
     #[test]
     fn any_compare() {
-        let regex = Regex::from(".*");
+        let regex = Regex::from(".*").unwrap();
 
         assert!(regex.compare(""));
         assert!(regex.compare("0.0"));
@@ -922,7 +978,7 @@ mod tests {
 
     #[test]
     fn alpha_compare() {
-        let regex = Regex::from(r#"\l*"#);
+        let regex = Regex::from(r#"\l*"#).unwrap();
 
         assert!(regex.compare(""));
         assert!(regex.compare("yay"));
@@ -938,5 +994,40 @@ mod tests {
         assert!(!regex.compare("-1214."));
         assert!(!regex.compare("-."));
         assert!(!regex.compare("asdfasdsfadf1214.12412."));
+    }
+
+    #[test]
+    fn bad_syntax1() {
+        let regex = Regex::from("((mis_matched_parens)))");
+
+        assert!(regex.is_none());
+    }
+
+    #[test]
+    fn bad_syntax2() {
+        let regex = Regex::from("()empty_parens");
+
+        assert!(regex.is_none());
+    }
+
+    #[test]
+    fn bad_syntax3() {
+        let regex = Regex::from("(*op_after_left_paren)");
+
+        assert!(regex.is_none());
+    }
+
+    #[test]
+    fn bad_syntax4() {
+        let regex = Regex::from("union_after||union");
+
+        assert!(regex.is_none());
+    }
+
+    #[test]
+    fn bad_syntax5() {
+        let regex = Regex::from("(nothing after union|)");
+
+        assert!(regex.is_none());
     }
 }
