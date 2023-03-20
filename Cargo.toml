@@ -1,11 +1,12 @@
 [package]
-name = "chomp"
+name = "chomper"
 version = "0.1.0"
 edition = "2021"
-authors = ["Niland Schumacher"]
+authors = ["Niland Schumacher <naschuma@ucsc.edu>"]
 description = "A regex library designed to be used in a lexer"
 homepage = "https://github.com/nilandasd/Chomp"
 include = ["/src"]
+readme = "README.md"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
