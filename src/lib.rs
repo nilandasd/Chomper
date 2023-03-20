@@ -680,6 +680,30 @@ impl Regex {
                 continue
             }
 
+            /* 
+            if c == '{' {
+                if next_char.is_digit()
+                    let quant_a = self.read_num();
+
+                    if next_char = ','
+                        if next_char == '}'
+                            insert a minimum match operator
+                        else if next_char is a number
+                            if next_char != '}'
+                                syntax error
+                            insert range operator 
+                    else if next char == '}'
+                      insert exact match operator
+                    else
+                      bad syntax
+                else if next_char == ','
+                  let quant_b = self.read_num();
+                  insert maximum match
+                else
+                  bad syntax
+            }
+            */
+
             if c == '\\' {
                 escape_flag = true;
                 continue;
