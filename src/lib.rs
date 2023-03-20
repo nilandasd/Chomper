@@ -193,6 +193,28 @@ impl Chomper {
         }
     }
 
+    pub fn will_eat(&self, c: char) -> bool {
+        match self.current_state {
+            Some(sid) => {
+                let state = &self.dfa_states[sid.0];
+                for transition in state.transitions.iter() {
+                    if Self::match_transit(&c, &transition.0) {
+                        return true;
+                    }
+                }
+                false
+            }
+            None => false,
+        }
+    }
+
+    pub fn is_accepting(&self) -> bool {
+        match self.current_state {
+            Some(state_id) => self.dfa_states[state_id.0].accepting,
+            None => false
+        }
+    }
+
     pub fn restart(&mut self) {
         self.current_state = Some(START_STATE);
     }
