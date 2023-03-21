@@ -1,6 +1,6 @@
 [package]
 name = "chomper"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2021"
 authors = ["Niland Schumacher <naschuma@ucsc.edu>"]
 description = "A regex library designed to be used in a lexer"

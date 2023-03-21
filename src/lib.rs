@@ -21,6 +21,7 @@ Special Symbols
     \L : non-alpha character
     \a : alphanumeric
     \A : non-alphanumeric
+    \w : whitespace
     .  : any character
     \  : escape character
 
@@ -40,6 +41,7 @@ enum Symbol {
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 enum Transit {
     Char(char),
+    WhiteSpace,
     Digit,
     Alpha,
     AlphaNumeric,
@@ -160,6 +162,7 @@ impl Chomper {
             Transit::NonAlpha => !c.is_alphabetic(),
             Transit::AlphaNumeric => c.is_ascii_digit() || c.is_alphabetic(),
             Transit::NonAlphaNumeric => !c.is_ascii_digit() && !c.is_alphabetic(),
+            Transit::WhiteSpace => c.is_ascii_whitespace(),
             Transit::Char(ch) => *c == *ch,
         }
     }
@@ -707,6 +710,7 @@ impl Chomper {
                     'L' => Transit::NonAlpha,
                     'a' => Transit::AlphaNumeric,
                     'A' => Transit::NonAlphaNumeric,
+                    'w' => Transit::WhiteSpace,
                     _ => Transit::Char(c),
                 };
 
