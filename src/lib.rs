@@ -190,6 +190,33 @@ impl Chomper {
         }
     }
 
+    pub fn match_at(&mut self, s: &str, start: usize) -> usize {
+        let mut state = &self.dfa_states[0];
+        let mut longest_match = 0;
+
+        for i in start..s.len() {
+            let c = s.chars().nth(i).unwrap();
+            let mut reject_flag = true;
+
+            for transition in state.transitions.iter() {
+                if Self::match_transit(&c, &transition.0) {
+                    state = &self.dfa_states[transition.1 .0];
+                    reject_flag = false;
+                    if state.accepting {
+                        longest_match = i - start + 1;
+                    }
+                    break;
+                }
+            }
+
+            if reject_flag {
+                break;
+            }
+        }
+
+        longest_match
+    }
+
     pub fn will_eat(&self, c: char) -> bool {
         match self.current_state {
             Some(sid) => {
@@ -1116,5 +1143,33 @@ mod tests {
         }
 
         assert!(chomper.is_accepting());
+    }
+
+    #[test]
+    fn match_at1() {
+        let mut chomper = Chomper::from("test");
+        let mut s = String::from("this is a test");
+
+        assert!(chomper.match_at(&s, 0) == 0);
+        assert!(chomper.match_at(&s, 10) == 4);
+    }
+
+    #[test]
+    fn match_at2() {
+        let mut chomper = Chomper::from(r#""\l*""#);
+        let mut s = String::from("\"test\"");
+
+        assert!(chomper.match_at(&s, 0) == 6);
+        assert!(chomper.match_at(&s, 3) == 0);
+    }
+
+    #[test]
+    fn match_at3() {
+        let mut chomper = Chomper::from("\\d*");
+        let mut s = String::from("test12345");
+
+        assert!(chomper.match_at(&s, 0) == 0);
+        assert!(chomper.match_at(&s, 3) == 0);
+        assert!(chomper.match_at(&s, 4) == 5);
     }
 }
