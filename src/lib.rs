@@ -134,24 +134,21 @@ impl Chomper {
         }
     }
 
-    pub fn from(regex: &str) -> Option<Self> {
+    pub fn from(regex: &str) -> Self {
         Self::new().set_pattern(regex)
     }
 
-    pub fn set_pattern(mut self, regex: &str) -> Option<Self> {
+    pub fn set_pattern(mut self, regex: &str) -> Self {
         self.raw_regex = regex.to_string();
         self.current_state = Some(START_STATE);
 
-        if !self.process_regex() {
-            return None;
-        }
-
+        self.process_regex();
         self.parse_regex();
         self.nfa_to_dfa();
         self.reduce_dfa();
         self.clean();
 
-        Some(self)
+        self
     }
 
     fn match_transit(c: &char, transit: &Transit) -> bool {
@@ -168,7 +165,7 @@ impl Chomper {
     }
 
     /*
-     *  This function is for giving a regex one character at a time, changing
+     *  This function takes one character at a time, changing
      *  the state of the internal DFA, and returning true if the DFA has not
      *  rejected the input character given the current state. If no state is set
      *  or the DFA rejects the input, than it returns false.
@@ -665,7 +662,7 @@ impl Chomper {
      *    5. *a
      *    6. *(
      */
-    fn process_regex(&mut self) -> bool {
+    fn process_regex(&mut self) {
         let mut escape_flag = false;
         let mut concat_flag = false;
         let mut depth = 0;
@@ -739,10 +736,10 @@ impl Chomper {
                             || *s == Symbol::Op(Operator::Plus)
                             || *s == Symbol::Op(Operator::Question)
                         {
-                            return false;
+                            panic!("Invalid Regex");
                         }
                     }
-                    None => return false,
+                    None => panic!("Invalid Regex"),
                 }
                 concat_flag = true;
                 self.tokenized_regex.push(Symbol::Op(Operator::Star));
@@ -757,10 +754,10 @@ impl Chomper {
                             || *s == Symbol::Op(Operator::Plus)
                             || *s == Symbol::Op(Operator::Question)
                         {
-                            return false;
+                            panic!("Invalid Regex");
                         }
                     }
-                    None => return false,
+                    None => panic!("Invalid Regex"),
                 }
                 concat_flag = true;
                 self.tokenized_regex.push(Symbol::Op(Operator::Plus));
@@ -775,10 +772,10 @@ impl Chomper {
                             || *s == Symbol::Op(Operator::Plus)
                             || *s == Symbol::Op(Operator::Question)
                         {
-                            return false;
+                            panic!("Invalid Regex");
                         }
                     }
-                    None => return false,
+                    None => panic!("Invalid Regex"),
                 }
                 concat_flag = true;
                 self.tokenized_regex.push(Symbol::Op(Operator::Question));
@@ -786,14 +783,10 @@ impl Chomper {
             }
             if c == '|' {
                 match self.tokenized_regex.last() {
-                    Some(s) => {
-                        if *s == Symbol::Op(Operator::Union)
-                            || *s == Symbol::Op(Operator::LeftParen)
-                        {
-                            return false;
-                        }
-                    }
-                    None => return false,
+                      Some(Symbol::Op(Operator::Union))
+                    | Some(Symbol::Op(Operator::LeftParen))
+                    | None => panic!("Invalid Regex"),
+                    _ => {}
                 }
                 concat_flag = false;
                 self.tokenized_regex.push(Symbol::Op(Operator::Union));
@@ -812,14 +805,10 @@ impl Chomper {
             if c == ')' {
                 depth -= 1;
                 match self.tokenized_regex.last() {
-                    Some(s) => {
-                        if *s == Symbol::Op(Operator::Union)
-                            || *s == Symbol::Op(Operator::LeftParen)
-                        {
-                            return false;
-                        }
-                    }
-                    None => return false,
+                      Some(Symbol::Op(Operator::Union))
+                    | Some(Symbol::Op(Operator::LeftParen))
+                    | None => panic!("Invalid Regex"),
+                    _ => {}
                 }
 
                 concat_flag = true;
@@ -837,10 +826,13 @@ impl Chomper {
         }
 
         if depth != 0 {
-            return false;
+            panic!("Invalid Regex");
         }
 
-        true
+        match self.tokenized_regex.last().unwrap() {
+            Symbol::Op(Operator::Union) => panic!("Invalid Regex"),
+            _ => {}
+        }
     }
 }
 
@@ -850,224 +842,225 @@ mod tests {
 
     #[test]
     fn compare1() {
-        let regex = Chomper::from("megaladonkus").unwrap();
+        let chomper = Chomper::from("megaladonkus");
 
-        assert!(!regex.compare(""));
-        assert!(!regex.compare("m"));
-        assert!(!regex.compare("me"));
-        assert!(!regex.compare("meg"));
-        assert!(!regex.compare("mega"));
-        assert!(!regex.compare("megal"));
-        assert!(!regex.compare("megala"));
-        assert!(!regex.compare("megalad"));
-        assert!(!regex.compare("megalado"));
-        assert!(!regex.compare("megaladon"));
-        assert!(!regex.compare("megaladonk"));
-        assert!(!regex.compare("megaladonku"));
-        assert!(regex.compare("megaladonkus")); // MATCH
-        assert!(!regex.compare("megaladonkuss"));
-        assert!(!regex.compare("megaladonkusss"));
-        assert!(!regex.compare("megaladonkussss"));
+        assert!(!chomper.compare(""));
+        assert!(!chomper.compare("m"));
+        assert!(!chomper.compare("me"));
+        assert!(!chomper.compare("meg"));
+        assert!(!chomper.compare("mega"));
+        assert!(!chomper.compare("megal"));
+        assert!(!chomper.compare("megala"));
+        assert!(!chomper.compare("megalad"));
+        assert!(!chomper.compare("megalado"));
+        assert!(!chomper.compare("megaladon"));
+        assert!(!chomper.compare("megaladonk"));
+        assert!(!chomper.compare("megaladonku"));
+        assert!( chomper.compare("megaladonkus")); // MATCH
+        assert!(!chomper.compare("megaladonkuss"));
+        assert!(!chomper.compare("megaladonkusss"));
+        assert!(!chomper.compare("megaladonkussss"));
     }
 
     #[test]
     fn compare2() {
-        let regex = Chomper::from("cheese|please").unwrap();
+        let chomper = Chomper::from("cheese|please");
 
-        assert!(!regex.compare("cheeseplease"));
-        assert!(!regex.compare("pleasecheese"));
-        assert!(!regex.compare("chees"));
-        assert!(!regex.compare("pleas"));
-        assert!(!regex.compare("chease"));
-        assert!(!regex.compare(""));
+        assert!(!chomper.compare("cheeseplease"));
+        assert!(!chomper.compare("pleasecheese"));
+        assert!(!chomper.compare("chees"));
+        assert!(!chomper.compare("pleas"));
+        assert!(!chomper.compare("chease"));
+        assert!(!chomper.compare(""));
 
-        assert!(regex.compare("cheese"));
-        assert!(regex.compare("please"));
+        assert!(chomper.compare("cheese"));
+        assert!(chomper.compare("please"));
     }
 
     #[test]
     fn compare3() {
-        let regex = Chomper::from("(foo|bar)*").unwrap();
+        let chomper = Chomper::from("(foo|bar)*");
 
-        assert!(!regex.compare("fo"));
-        assert!(!regex.compare("ba"));
-        assert!(!regex.compare("fooblah"));
-        assert!(!regex.compare("barblah"));
+        assert!(!chomper.compare("fo"));
+        assert!(!chomper.compare("ba"));
+        assert!(!chomper.compare("fooblah"));
+        assert!(!chomper.compare("barblah"));
 
-        assert!(regex.compare(""));
-        assert!(regex.compare("foo"));
-        assert!(regex.compare("bar"));
-        assert!(regex.compare("foofoo"));
-        assert!(regex.compare("barbar"));
-        assert!(regex.compare("foobar"));
-        assert!(regex.compare("barfoo"));
-        assert!(regex.compare("foofoofoo"));
-        assert!(regex.compare("foofoobar"));
-        assert!(regex.compare("foobarfoo"));
-        assert!(regex.compare("foobarbar"));
-        assert!(regex.compare("barfoofoo"));
-        assert!(regex.compare("barfoobar"));
-        assert!(regex.compare("barbarfoo"));
-        assert!(regex.compare("barbarbar"));
+        assert!(chomper.compare(""));
+        assert!(chomper.compare("foo"));
+        assert!(chomper.compare("bar"));
+        assert!(chomper.compare("foofoo"));
+        assert!(chomper.compare("barbar"));
+        assert!(chomper.compare("foobar"));
+        assert!(chomper.compare("barfoo"));
+        assert!(chomper.compare("foofoofoo"));
+        assert!(chomper.compare("foofoobar"));
+        assert!(chomper.compare("foobarfoo"));
+        assert!(chomper.compare("foobarbar"));
+        assert!(chomper.compare("barfoofoo"));
+        assert!(chomper.compare("barfoobar"));
+        assert!(chomper.compare("barbarfoo"));
+        assert!(chomper.compare("barbarbar"));
     }
 
     #[test]
     fn compare4() {
-        let regex = Chomper::from("1*2*3*").unwrap();
+        let chomper = Chomper::from("1*2*3*");
 
-        assert!(regex.compare(""));
-        assert!(regex.compare("1"));
-        assert!(regex.compare("22"));
-        assert!(regex.compare("123"));
-        assert!(regex.compare("333"));
-        assert!(regex.compare("1133"));
-        assert!(regex.compare("11122"));
-        assert!(regex.compare("233333"));
-        assert!(regex.compare("1122233"));
+        assert!(chomper.compare(""));
+        assert!(chomper.compare("1"));
+        assert!(chomper.compare("22"));
+        assert!(chomper.compare("123"));
+        assert!(chomper.compare("333"));
+        assert!(chomper.compare("1133"));
+        assert!(chomper.compare("11122"));
+        assert!(chomper.compare("233333"));
+        assert!(chomper.compare("1122233"));
 
-        assert!(!regex.compare("11222334"));
+        assert!(!chomper.compare("11222334"));
     }
     #[test]
     fn compare5() {
-        let regex = Chomper::from("((420)*(69)*(1738)*_)*").unwrap();
+        let chomper = Chomper::from("((420)*(69)*(1738)*_)*");
 
-        assert!(regex.compare(""));
-        assert!(regex.compare("_"));
-        assert!(regex.compare("_______"));
-        assert!(regex.compare("______420_____"));
-        assert!(regex.compare("420_"));
-        assert!(regex.compare("69_"));
-        assert!(regex.compare("1738_"));
-        assert!(regex.compare("420__69__1738__"));
-        assert!(regex.compare("1738___420___69___"));
+        assert!(chomper.compare(""));
+        assert!(chomper.compare("_"));
+        assert!(chomper.compare("_______"));
+        assert!(chomper.compare("______420_____"));
+        assert!(chomper.compare("420_"));
+        assert!(chomper.compare("69_"));
+        assert!(chomper.compare("1738_"));
+        assert!(chomper.compare("420__69__1738__"));
+        assert!(chomper.compare("1738___420___69___"));
 
-        assert!(!regex.compare("420"));
-        assert!(!regex.compare("69"));
-        assert!(!regex.compare("1738"));
+        assert!(!chomper.compare("420"));
+        assert!(!chomper.compare("69"));
+        assert!(!chomper.compare("1738"));
     }
 
     #[test]
     fn int_compare() {
-        let regex = Chomper::from("(1|2|3|4|5|6|7|8|9|0)+").unwrap();
+        let chomper = Chomper::from("(1|2|3|4|5|6|7|8|9|0)+");
 
-        assert!(regex.compare("654321"));
-        assert!(regex.compare("123456"));
+        assert!(chomper.compare("654321"));
+        assert!(chomper.compare("123456"));
 
-        assert!(!regex.compare(""));
-        assert!(!regex.compare("asdfasdf"));
-        assert!(!regex.compare("1234asdf"));
+        assert!(!chomper.compare(""));
+        assert!(!chomper.compare("asdfasdf"));
+        assert!(!chomper.compare("1234asdf"));
     }
 
     #[test]
     fn float_compare() {
-        let regex = Chomper::from(r#"-?\d+(\.\d+)?"#).unwrap();
+        let chomper = Chomper::from(r#"-?\d+(\.\d+)?"#);
 
-        assert!(regex.compare("654321"));
-        assert!(regex.compare("0.0"));
-        assert!(regex.compare("123.456"));
-        assert!(regex.compare("-123.456"));
-        assert!(regex.compare("0.420420420420420420"));
+        assert!(chomper.compare("654321"));
+        assert!(chomper.compare("0.0"));
+        assert!(chomper.compare("123.456"));
+        assert!(chomper.compare("-123.456"));
+        assert!(chomper.compare("0.420420420420420420"));
 
-        assert!(!regex.compare("should not match"));
-        assert!(!regex.compare("12414..123123"));
-        assert!(!regex.compare("1214."));
-        assert!(!regex.compare("-1214."));
-        assert!(!regex.compare("-."));
-        assert!(!regex.compare("1214.12412."));
+        assert!(!chomper.compare("should not match"));
+        assert!(!chomper.compare("12414..123123"));
+        assert!(!chomper.compare("1214."));
+        assert!(!chomper.compare("-1214."));
+        assert!(!chomper.compare("-."));
+        assert!(!chomper.compare("1214.12412."));
     }
 
     #[test]
     fn string_compare() {
-        let regex = Chomper::from(r#"".*""#).unwrap();
+        let chomper = Chomper::from(r#"".*""#);
 
-        assert!(regex.compare("\"this is a test to match on strings\""));
-        assert!(regex
+        assert!(chomper.compare("\"this is a test to match on strings\""));
+        assert!(chomper
             .compare("\"any symbol should match within the quotes: (*!&^@$!@%2351_(*&))@(#%\""));
-        assert!(regex.compare("\"\""));
-        assert!(regex.compare("\"s\""));
+        assert!(chomper.compare("\"\""));
+        assert!(chomper.compare("\"s\""));
 
-        assert!(!regex.compare("\"no closing quote"));
-        assert!(!regex.compare("no begining quote\""));
-        assert!(!regex.compare("no quotes"));
-        assert!(!regex.compare("inner \"\" quotes"));
+        assert!(!chomper.compare("\"no closing quote"));
+        assert!(!chomper.compare("no begining quote\""));
+        assert!(!chomper.compare("no quotes"));
+        assert!(!chomper.compare("inner \"\" quotes"));
     }
 
     #[test]
     fn any_compare() {
-        let regex = Chomper::from(".*").unwrap();
+        let chomper = Chomper::from(".*");
 
-        assert!(regex.compare(""));
-        assert!(regex.compare("0.0"));
-        assert!(regex.compare("123.456"));
-        assert!(regex.compare("-123.456"));
-        assert!(regex.compare("0.420420420420420420"));
-        assert!(regex.compare("no"));
-        assert!(regex.compare("blah blah blah blah"));
-        assert!(regex.compare("12414..123123"));
-        assert!(regex.compare("1214."));
-        assert!(regex.compare("-1214."));
-        assert!(regex.compare("-."));
-        assert!(regex.compare("1214.12412."));
+        assert!(chomper.compare(""));
+        assert!(chomper.compare("0.0"));
+        assert!(chomper.compare("123.456"));
+        assert!(chomper.compare("-123.456"));
+        assert!(chomper.compare("0.420420420420420420"));
+        assert!(chomper.compare("no"));
+        assert!(chomper.compare("blah blah blah blah"));
+        assert!(chomper.compare("12414..123123"));
+        assert!(chomper.compare("1214."));
+        assert!(chomper.compare("-1214."));
+        assert!(chomper.compare("-."));
+        assert!(chomper.compare("1214.12412."));
     }
 
     #[test]
     fn alpha_compare() {
-        let regex = Chomper::from(r#"\l*"#).unwrap();
+        let chomper = Chomper::from(r#"\l*"#);
 
-        assert!(regex.compare(""));
-        assert!(regex.compare("yay"));
-        assert!(regex.compare("abcdefghijklmnopqrstuvwxyz"));
+        assert!(chomper.compare(""));
+        assert!(chomper.compare("yay"));
+        assert!(chomper.compare("abcdefghijklmnopqrstuvwxyz"));
 
-        assert!(!regex.compare("0.0asdfas"));
-        assert!(!regex.compare("1sdfask23.456"));
-        assert!(!regex.compare("-123.456"));
-        assert!(!regex.compare("0.420420asdfasfdjkkk420420420420"));
-        assert!(!regex.compare("blah blah blah blah"));
-        assert!(!regex.compare("zxcvzozxcv12414..123123"));
-        assert!(!regex.compare("1214."));
-        assert!(!regex.compare("-1214."));
-        assert!(!regex.compare("-."));
-        assert!(!regex.compare("asdfasdsfadf1214.12412."));
+        assert!(!chomper.compare("0.0asdfas"));
+        assert!(!chomper.compare("1sdfask23.456"));
+        assert!(!chomper.compare("-123.456"));
+        assert!(!chomper.compare("0.420420asdfasfdjkkk420420420420"));
+        assert!(!chomper.compare("blah blah blah blah"));
+        assert!(!chomper.compare("zxcvzozxcv12414..123123"));
+        assert!(!chomper.compare("1214."));
+        assert!(!chomper.compare("-1214."));
+        assert!(!chomper.compare("-."));
+        assert!(!chomper.compare("asdfasdsfadf1214.12412."));
     }
 
     #[test]
+    #[should_panic]
     fn bad_syntax1() {
-        let regex = Chomper::from("((mis_matched_parens)))");
-
-        assert!(regex.is_none());
+        Chomper::from("((mis_matched_parens)))");
     }
 
     #[test]
+    #[should_panic]
     fn bad_syntax2() {
-        let regex = Chomper::from("()empty_parens");
-
-        assert!(regex.is_none());
+        Chomper::from("()empty_parens");
     }
 
     #[test]
+    #[should_panic]
     fn bad_syntax3() {
-        let regex = Chomper::from("(*op_after_left_paren)");
-
-        assert!(regex.is_none());
+        Chomper::from("(*op_after_left_paren)");
     }
 
     #[test]
+    #[should_panic]
     fn bad_syntax4() {
-        let regex = Chomper::from("union_after||union");
-
-        assert!(regex.is_none());
+        Chomper::from("union_after||union");
     }
 
     #[test]
+    #[should_panic]
     fn bad_syntax5() {
-        let regex = Chomper::from("(nothing after union|)");
+        Chomper::from("(right paren after union|)");
+    }
 
-        assert!(regex.is_none());
+    #[test]
+    #[should_panic]
+    fn bad_syntax6() {
+        Chomper::from("nothing after union|");
     }
 
     #[test]
     fn feed1() {
-        let mut chomper = Chomper::from("success").unwrap();
+        let mut chomper = Chomper::from("success");
 
         for c in "success".chars() {
             assert!(chomper.feed(c));
@@ -1076,7 +1069,7 @@ mod tests {
 
     #[test]
     fn feed2() {
-        let mut chomper = Chomper::from("success").unwrap();
+        let mut chomper = Chomper::from("success");
 
         for c in "bad".chars() {
             assert!(!chomper.feed(c));
@@ -1085,7 +1078,7 @@ mod tests {
 
     #[test]
     fn feed3() {
-        let mut chomper = Chomper::from("success").unwrap();
+        let mut chomper = Chomper::from("success");
 
         for c in "success".chars() {
             assert!(chomper.feed(c));
@@ -1100,5 +1093,28 @@ mod tests {
         for c in "success".chars() {
             assert!(chomper.feed(c));
         }
+    }
+
+    #[test]
+    fn feed4() {
+        let mut chomper = Chomper::from("1234567890");
+        let mut s = String::from("");
+
+        for _ in 0..100 {
+            s.push_str("123456789");
+        }
+
+        s.push_str("0");
+
+        for c in s.chars() {
+            assert!(!chomper.is_accepting());
+
+            if !chomper.feed(c) {
+                chomper.restart();
+                chomper.feed(c);
+            } 
+        }
+
+        assert!(chomper.is_accepting());
     }
 }
