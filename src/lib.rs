@@ -153,7 +153,7 @@ impl Chomper {
         self
     }
 
-    fn match_transit(c: &char, transit: &Transit) -> bool {
+    fn match_transit(c: char, transit: Transit) -> bool {
         match transit {
             Transit::Any => true,
             Transit::Digit => c.is_ascii_digit(),
@@ -163,7 +163,7 @@ impl Chomper {
             Transit::AlphaNumeric => c.is_ascii_digit() || c.is_alphabetic(),
             Transit::NonAlphaNumeric => !c.is_ascii_digit() && !c.is_alphabetic(),
             Transit::WhiteSpace => c.is_ascii_whitespace(),
-            Transit::Char(ch) => *c == *ch,
+            Transit::Char(ch) => c == ch,
         }
     }
 
@@ -179,7 +179,7 @@ impl Chomper {
                 let state = &self.dfa_states[sid.0];
 
                 for transition in state.transitions.iter() {
-                    if Self::match_transit(&c, &transition.0) {
+                    if Self::match_transit(c, transition.0) {
                         self.current_state = Some(transition.1);
                         return true;
                     }
@@ -193,16 +193,16 @@ impl Chomper {
         }
     }
 
-    pub fn match_at(&mut self, s: &str, start: usize) -> usize {
+    pub fn match_at(&mut self, s: &[u8], start: usize) -> usize {
         let mut state = &self.dfa_states[0];
         let mut longest_match = 0;
 
         for i in start..s.len() {
-            let c = s.chars().nth(i).unwrap();
+            let c = s[i];
             let mut reject_flag = true;
 
             for transition in state.transitions.iter() {
-                if Self::match_transit(&c, &transition.0) {
+                if Self::match_transit(c as char, transition.0) {
                     state = &self.dfa_states[transition.1 .0];
                     reject_flag = false;
                     if state.accepting {
@@ -225,7 +225,7 @@ impl Chomper {
             Some(sid) => {
                 let state = &self.dfa_states[sid.0];
                 for transition in state.transitions.iter() {
-                    if Self::match_transit(&c, &transition.0) {
+                    if Self::match_transit(c, transition.0) {
                         return true;
                     }
                 }
@@ -256,7 +256,7 @@ impl Chomper {
             let mut reject_flag = true;
 
             for transition in state.transitions.iter() {
-                if Self::match_transit(&c, &transition.0) {
+                if Self::match_transit(c, transition.0) {
                     state = &self.dfa_states[transition.1 .0];
                     reject_flag = false;
                     break;
@@ -1152,28 +1152,28 @@ mod tests {
     #[test]
     fn match_at1() {
         let mut chomper = Chomper::from("test");
-        let mut s = String::from("this is a test");
+        let s = String::from("this is a test");
 
-        assert!(chomper.match_at(&s, 0) == 0);
-        assert!(chomper.match_at(&s, 10) == 4);
+        assert!(chomper.match_at(&s.as_bytes(), 0) == 0);
+        assert!(chomper.match_at(&s.as_bytes(), 10) == 4);
     }
 
     #[test]
     fn match_at2() {
         let mut chomper = Chomper::from(r#""\l*""#);
-        let mut s = String::from("\"test\"");
+        let s = String::from("\"test\"");
 
-        assert!(chomper.match_at(&s, 0) == 6);
-        assert!(chomper.match_at(&s, 3) == 0);
+        assert!(chomper.match_at(&s.as_bytes(), 0) == 6);
+        assert!(chomper.match_at(&s.as_bytes(), 3) == 0);
     }
 
     #[test]
     fn match_at3() {
         let mut chomper = Chomper::from("\\d*");
-        let mut s = String::from("test12345");
+        let s = String::from("test12345");
 
-        assert!(chomper.match_at(&s, 0) == 0);
-        assert!(chomper.match_at(&s, 3) == 0);
-        assert!(chomper.match_at(&s, 4) == 5);
+        assert!(chomper.match_at(&s.as_bytes(), 0) == 0);
+        assert!(chomper.match_at(&s.as_bytes(), 3) == 0);
+        assert!(chomper.match_at(&s.as_bytes(), 4) == 5);
     }
 }
