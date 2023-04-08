@@ -24,6 +24,7 @@ Special Symbols
     \w : whitespace
     .  : any character
     \  : escape character
+    ^  : new line
 
 Grouping
     () : matching group
@@ -41,6 +42,7 @@ enum Symbol {
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 enum Transit {
     Char(char),
+    NewLine,
     WhiteSpace,
     Digit,
     Alpha,
@@ -163,6 +165,7 @@ impl Chomper {
             Transit::AlphaNumeric => c.is_ascii_digit() || c.is_alphabetic(),
             Transit::NonAlphaNumeric => !c.is_ascii_digit() && !c.is_alphabetic(),
             Transit::WhiteSpace => c.is_ascii_whitespace(),
+            Transit::NewLine => c == '\n',
             Transit::Char(ch) => c == ch,
         }
     }
@@ -173,13 +176,13 @@ impl Chomper {
      *  rejected the input character given the current state. If no state is set
      *  or the DFA rejects the input, than it returns false.
      */
-    pub fn feed(&mut self, c: char) -> bool {
+    pub fn feed(&mut self, c: u8) -> bool {
         match self.current_state {
             Some(sid) => {
                 let state = &self.dfa_states[sid.0];
 
                 for transition in state.transitions.iter() {
-                    if Self::match_transit(c, transition.0) {
+                    if Self::match_transit(c as char, transition.0) {
                         self.current_state = Some(transition.1);
                         return true;
                     }
@@ -758,6 +761,15 @@ impl Chomper {
                 self.tokenized_regex.push(Symbol::Transit(Transit::Any));
                 continue;
             }
+            if c == '^' {
+                if concat_flag {
+                    self.tokenized_regex.push(Symbol::Op(Operator::Concat));
+                }
+
+                concat_flag = true;
+                self.tokenized_regex.push(Symbol::Transit(Transit::NewLine));
+                continue;
+            }
             if c == '*' {
                 match self.tokenized_regex.last() {
                     Some(s) => {
@@ -1093,8 +1105,8 @@ mod tests {
     fn feed1() {
         let mut chomper = Chomper::from("success");
 
-        for c in "success".chars() {
-            assert!(chomper.feed(c));
+        for c in "success".as_bytes() {
+            assert!(chomper.feed(*c));
         }
     }
 
@@ -1102,8 +1114,8 @@ mod tests {
     fn feed2() {
         let mut chomper = Chomper::from("success");
 
-        for c in "bad".chars() {
-            assert!(!chomper.feed(c));
+        for c in "bad".as_bytes() {
+            assert!(!chomper.feed(*c));
         }
     }
 
@@ -1111,18 +1123,18 @@ mod tests {
     fn feed3() {
         let mut chomper = Chomper::from("success");
 
-        for c in "success".chars() {
-            assert!(chomper.feed(c));
+        for c in "success".as_bytes() {
+            assert!(chomper.feed(*c));
         }
 
-        for c in "success".chars() {
-            assert!(!chomper.feed(c));
+        for c in "success".as_bytes()  {
+            assert!(!chomper.feed(*c));
         }
 
         chomper.restart();
 
-        for c in "success".chars() {
-            assert!(chomper.feed(c));
+        for c in "success".as_bytes() {
+            assert!(chomper.feed(*c));
         }
     }
 
@@ -1137,12 +1149,12 @@ mod tests {
 
         s.push_str("0");
 
-        for c in s.chars() {
+        for c in s.as_bytes() {
             assert!(!chomper.is_accepting());
 
-            if !chomper.feed(c) {
+            if !chomper.feed(*c) {
                 chomper.restart();
-                chomper.feed(c);
+                chomper.feed(*c);
             } 
         }
 
