@@ -245,6 +245,10 @@ impl Chomper {
         }
     }
 
+    pub fn rejected(&self) -> bool {
+        self.current_state.is_none()
+    }
+
     pub fn restart(&mut self) {
         self.current_state = Some(START_STATE);
     }
