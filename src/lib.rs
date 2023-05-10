@@ -1166,6 +1166,18 @@ mod tests {
     }
 
     #[test]
+    fn feed5() {
+        let mut chomper = Chomper::from(r#""(.|\\|\\")*""#);
+        let s = String::from(r#""\"\"\idfg\dgf\xfgf\"fdhg\"abc""#);
+
+        for c in s.as_bytes() {
+            chomper.feed(*c);
+        }
+
+        assert!(chomper.is_accepting());
+    }
+
+    #[test]
     fn match_at1() {
         let mut chomper = Chomper::from("test");
         let s = String::from("this is a test");
