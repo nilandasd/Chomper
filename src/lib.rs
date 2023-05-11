@@ -471,31 +471,23 @@ impl Chomper {
      */
     fn epsilon_closure(&self, nfa_state_ids: Vec<StateID>) -> Vec<StateID> {
         let mut closure = nfa_state_ids.clone();
-        let mut prev_added_states = nfa_state_ids;
-        let mut next_added_states = Vec::<StateID>::new();
-        let mut add_flag = false;
+        let mut checked_count = 0;
 
-        loop {
-            for id in prev_added_states.iter() {
-                let state = &self.nfa_states[id.0];
+        while checked_count < closure.len() {
+            for id in checked_count..closure.len() {
+                checked_count += 1;
+
+                let state = &self.nfa_states[closure[id].0];
 
                 for transition in state.transitions.iter() {
                     if transition.0.is_none() && !closure.contains(&transition.1) {
                         closure.push(transition.1);
-                        next_added_states.push(transition.1);
-                        add_flag = true;
                     }
                 }
             }
-
-            if !add_flag {
-                return closure;
-            }
-
-            prev_added_states = next_added_states.clone();
-            next_added_states.clear();
-            add_flag = false;
         }
+
+        closure
     }
 
     /*
