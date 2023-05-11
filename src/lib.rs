@@ -393,23 +393,20 @@ impl Chomper {
     fn nfa_to_dfa(&mut self) {
         let nfa_start_states = self.epsilon_closure(vec![self.final_nfa.start]);
         let accepting = nfa_start_states.contains(&self.final_nfa.accept);
-        let dfa_start_state = DFAstate::new(self.dfa_states.len(), nfa_start_states, accepting);
-        let mut prev_added_states = vec![dfa_start_state.id];
-        let mut next_added_states = Vec::<StateID>::new();
-        let mut dfa_states = Vec::<DFAstate>::new();
-        let mut add_flag = false;
+        let dfa_start_state = DFAstate::new(0, nfa_start_states, accepting);
+        let mut dfa_states = vec![dfa_start_state];
+        let mut checked_count = 0;
 
-        dfa_states.push(dfa_start_state);
-
-        loop {
-            for dfa_state_id in prev_added_states.iter() {
+        while checked_count < dfa_states.len() {
+            for dfa_state in checked_count..dfa_states.len() {
+                checked_count += 1;
                 let possible_transits =
-                    self.get_transits(&dfa_states[dfa_state_id.0].equivalent_nfa_states);
+                    self.get_transits(&dfa_states[dfa_state].equivalent_nfa_states);
 
                 for transit in possible_transits.iter() {
                     let transition_ids = self.nfa_transitions(
                         *transit,
-                        &dfa_states[dfa_state_id.0].equivalent_nfa_states,
+                        &dfa_states[dfa_state].equivalent_nfa_states,
                     );
                     let nfa_state_ids = self.epsilon_closure(transition_ids);
                     let accepting = nfa_state_ids.contains(&self.final_nfa.accept);
@@ -419,29 +416,19 @@ impl Chomper {
                     }
 
                     if let Some(state_id) = self.find_dfa_state(&dfa_states, &nfa_state_ids) {
-                        dfa_states[dfa_state_id.0]
+                        dfa_states[dfa_state]
                             .transitions
                             .push((*transit, state_id));
                         continue;
                     }
 
                     let new_state = DFAstate::new(dfa_states.len(), nfa_state_ids, accepting);
-                    add_flag = true;
-                    dfa_states[dfa_state_id.0]
+                    dfa_states[dfa_state]
                         .transitions
                         .push((*transit, new_state.id));
-                    next_added_states.push(new_state.id);
                     dfa_states.push(new_state);
                 }
             }
-
-            if !add_flag {
-                break;
-            }
-
-            add_flag = false;
-            prev_added_states = next_added_states.clone();
-            next_added_states.clear();
         }
 
         self.dfa_states = dfa_states;
