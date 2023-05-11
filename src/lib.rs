@@ -155,6 +155,7 @@ impl Chomper {
         self
     }
 
+    #[inline]
     fn match_transit(c: char, transit: Transit) -> bool {
         match transit {
             Transit::Any => true,
@@ -241,7 +242,7 @@ impl Chomper {
     pub fn is_accepting(&self) -> bool {
         match self.current_state {
             Some(state_id) => self.dfa_states[state_id.0].accepting,
-            None => false
+            None => false,
         }
     }
 
@@ -366,7 +367,9 @@ impl Chomper {
 
         for stateid in states.iter() {
             for transit in self.nfa_states[stateid.0].transitions.iter() {
-                if let Some(t) = transit.0 { result.push(t) }
+                if let Some(t) = transit.0 {
+                    result.push(t)
+                }
             }
         }
 
@@ -830,7 +833,7 @@ impl Chomper {
             }
             if c == '|' {
                 match self.tokenized_regex.last() {
-                      Some(Symbol::Op(Operator::Union))
+                    Some(Symbol::Op(Operator::Union))
                     | Some(Symbol::Op(Operator::LeftParen))
                     | None => panic!("Invalid Regex"),
                     _ => {}
@@ -852,7 +855,7 @@ impl Chomper {
             if c == ')' {
                 depth -= 1;
                 match self.tokenized_regex.last() {
-                      Some(Symbol::Op(Operator::Union))
+                    Some(Symbol::Op(Operator::Union))
                     | Some(Symbol::Op(Operator::LeftParen))
                     | None => panic!("Invalid Regex"),
                     _ => {}
@@ -876,9 +879,8 @@ impl Chomper {
             panic!("Invalid Regex");
         }
 
-        match self.tokenized_regex.last().unwrap() {
-            Symbol::Op(Operator::Union) => panic!("Invalid Regex"),
-            _ => {}
+        if let Some(Symbol::Op(Operator::Union)) = self.tokenized_regex.last() {
+            panic!("Invalid Regex");
         }
     }
 }
@@ -903,7 +905,7 @@ mod tests {
         assert!(!chomper.compare("megaladon"));
         assert!(!chomper.compare("megaladonk"));
         assert!(!chomper.compare("megaladonku"));
-        assert!( chomper.compare("megaladonkus")); // MATCH
+        assert!(chomper.compare("megaladonkus")); // MATCH
         assert!(!chomper.compare("megaladonkuss"));
         assert!(!chomper.compare("megaladonkusss"));
         assert!(!chomper.compare("megaladonkussss"));
@@ -1131,7 +1133,7 @@ mod tests {
             assert!(chomper.feed(*c));
         }
 
-        for c in "success".as_bytes()  {
+        for c in "success".as_bytes() {
             assert!(!chomper.feed(*c));
         }
 
@@ -1159,7 +1161,7 @@ mod tests {
             if !chomper.feed(*c) {
                 chomper.restart();
                 chomper.feed(*c);
-            } 
+            }
         }
 
         assert!(chomper.is_accepting());
